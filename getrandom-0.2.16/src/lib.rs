@@ -31,6 +31,7 @@
 //! | QNX Neutrino      | `*‑nto-qnx*`       | [`/dev/urandom`][14] (identical to `/dev/random`)
 //! | AIX               | `*-ibm-aix`        | [`/dev/urandom`][15]
 //! | Cygwin            | `*-cygwin`         | [`getrandom`][19] (based on [`RtlGenRandom`])
+//! | OP-TEE            | `*-optee`          | [`Random::generate`] from OP-TEE UTEE API
 //!
 //! Pull Requests that add support for new targets to `getrandom` are always welcome.
 //!
@@ -326,6 +327,8 @@ cfg_if! {
         #[path = "solid.rs"] mod imp;
     } else if #[cfg(target_os = "espidf")] {
         #[path = "espidf.rs"] mod imp;
+    } else if #[cfg(target_os = "optee")] {
+        #[path = "optee.rs"] mod imp;
     } else if #[cfg(windows)] {
         #[path = "windows.rs"] mod imp;
     } else if #[cfg(all(target_arch = "x86_64", target_env = "sgx"))] {
