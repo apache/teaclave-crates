@@ -31,7 +31,7 @@
 //! | QNX Neutrino      | `*‑nto-qnx*`       | [`/dev/urandom`][14] (identical to `/dev/random`)
 //! | AIX               | `*-ibm-aix`        | [`/dev/urandom`][15]
 //! | Cygwin            | `*-cygwin`         | [`getrandom`][19] (based on [`RtlGenRandom`])
-//! | OP-TEE            | `*-optee`          | [`Random::generate`] from OP-TEE UTEE API
+//! | OP-TEE            | `*-optee`          | [`TEE_GenerateRandom`] from OP-TEE UTEE API
 //!
 //! Pull Requests that add support for new targets to `getrandom` are always welcome.
 //!
@@ -200,6 +200,7 @@
 //! [CommonJS modules]: https://nodejs.org/api/modules.html
 //! [ES modules]: https://nodejs.org/api/esm.html
 //! [`sys_read_entropy`]: https://github.com/hermit-os/kernel/blob/315f58ff5efc81d9bf0618af85a59963ff55f8b1/src/syscalls/entropy.rs#L47-L55
+//! [`TEE_GenerateRandom`]: https://github.com/OP-TEE/optee_os/blob/master/lib/libutee/include/tee_internal_api.h
 //! [platform-support]: https://doc.rust-lang.org/stable/rustc/platform-support.html
 
 #![doc(
