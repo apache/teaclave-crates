@@ -42,6 +42,7 @@ header:
 
     # Third-party libraries - included in licenses directory
     - 'ring-0.17.14'                           # LICENSE-ring.txt
+    - 'getrandom-0.2.16'                       # LICENSE-getrandom.txt
 
 dependency:
   files:

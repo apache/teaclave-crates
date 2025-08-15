@@ -211,3 +211,6 @@ Third-party components included in this distribution:
 
 - ring-0.17.14/
    License: See licenses/LICENSE-ring.txt
+
+- getrandom-0.2.16/
+   License: See licenses/LICENSE-getrandom.txt
