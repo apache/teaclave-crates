@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache-green.svg)](LICENSE)
 [![Homepage](https://img.shields.io/badge/site-homepage-blue)](https://teaclave.apache.org/)
 
-This repository hosts Rust crates maintained by the [Teaclave community](https://github.com/apache/incubator-teaclave). These include ported and TEE-adapted dependencies designed for secure, memory-safe development in confidential computing environments.
+This repository hosts Rust crates maintained by the [Teaclave community](https://github.com/apache/teaclave). These include ported and TEE-adapted dependencies designed for secure, memory-safe development in confidential computing environments.
 
 ## Purpose of This Repository
 
