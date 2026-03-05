@@ -1,0 +1,212 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+This patch adapts the libc for the OP-TEE target.
+Target: aarch64-unknown-optee, arm-unknown-optee
+Base-Commit: e879ee90b6cd8f79b352d4d4d1f8ca05f94f2f53
+
+---
+ build.rs         |   2 +-
+ src/lib.rs       |   9 ++++
+ src/optee/mod.rs | 135 +++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 145 insertions(+), 1 deletion(-)
+ create mode 100644 src/optee/mod.rs
+
+diff --git a/build.rs b/build.rs
+index 199a9ac42..46cbed7bf 100644
+--- a/build.rs
++++ b/build.rs
+@@ -38,7 +38,7 @@ const CHECK_CFG_EXTRA: &[(&str, &[&str])] = &[
+     (
+         "target_os",
+         &[
+-            "switch", "aix", "ohos", "hurd", "rtems", "visionos", "nuttx", "cygwin", "qurt",
++            "switch", "aix", "ohos", "hurd", "rtems", "visionos", "nuttx", "cygwin", "qurt", "optee",
+         ],
+     ),
+     (
+diff --git a/src/lib.rs b/src/lib.rs
+index bb41b4356..db8fcf0dc 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -24,6 +24,7 @@
+     unsafe_op_in_unsafe_fn
+ )]
+ #![cfg_attr(libc_deny_warnings, deny(warnings))]
++#![allow(unreachable_pub)]
+ // Attributes needed when building as part of the standard library
+ #![cfg_attr(feature = "rustc-dep-of-std", feature(link_cfg, no_core))]
+ #![cfg_attr(feature = "rustc-dep-of-std", allow(internal_features))]
+@@ -127,6 +128,14 @@ cfg_if! {
+         mod teeos;
+         pub use teeos::*;
+ 
++        prelude!();
++    } else if #[cfg(target_os = "optee")] {
++        mod primitives;
++        pub use primitives::*;
++
++        mod optee;
++        pub use optee::*;
++
+         prelude!();
+     } else if #[cfg(target_os = "trusty")] {
+         mod primitives;
+diff --git a/src/optee/mod.rs b/src/optee/mod.rs
+new file mode 100644
+index 000000000..13f23d177
+--- /dev/null
++++ b/src/optee/mod.rs
+@@ -0,0 +1,135 @@
++//! libc bindings for OP-TEE OS
++//!
++//! OP-TEE Trusted Applications run in a restricted TEE environment.
++//! There is no POSIX kernel; the C runtime is provided by libutee/libutils.
++#![allow(non_camel_case_types)]
++#![allow(non_snake_case)]
++
++use crate::prelude::*;
++
++// -----------------------------------------------------------------------
++// Arch-specific types
++pub type wchar_t = u32;
++
++// -----------------------------------------------------------------------
++// Fixed-width types (re-exported from primitives)
++pub use crate::primitives::*;
++
++// -----------------------------------------------------------------------
++// Standard C types
++
++pub type size_t = usize;
++pub type ptrdiff_t = isize;
++pub type intptr_t = isize;
++pub type uintptr_t = usize;
++pub type ssize_t = isize;
++
++pub type intmax_t = i64;
++pub type uintmax_t = u64;
++
++pub type off_t = i64;
++pub type time_t = c_long;
++
++// -----------------------------------------------------------------------
++// errno constants (subset used by std)
++// OP-TEE's libutee exposes a POSIX-compatible errno set via utee_syscalls.h
++pub const EPERM: c_int = 1;
++pub const ENOENT: c_int = 2;
++pub const EINTR: c_int = 4;
++pub const EIO: c_int = 5;
++pub const ENOMEM: c_int = 12;
++pub const EACCES: c_int = 13;
++pub const EFAULT: c_int = 14;
++pub const EBUSY: c_int = 16;
++pub const EEXIST: c_int = 17;
++pub const ENODEV: c_int = 19;
++pub const ENOTDIR: c_int = 20;
++pub const EISDIR: c_int = 21;
++pub const EINVAL: c_int = 22;
++pub const ENFILE: c_int = 23;
++pub const EMFILE: c_int = 24;
++pub const ENOSPC: c_int = 28;
++pub const ESPIPE: c_int = 29;
++pub const EROFS: c_int = 30;
++pub const EMLINK: c_int = 31;
++pub const EPIPE: c_int = 32;
++pub const ENOSYS: c_int = 38;
++pub const ENOTEMPTY: c_int = 39;
++pub const ELOOP: c_int = 40;
++pub const EWOULDBLOCK: c_int = EAGAIN;
++pub const EAGAIN: c_int = 11;
++pub const EADDRINUSE: c_int = 98;
++pub const EADDRNOTAVAIL: c_int = 99;
++pub const ENETDOWN: c_int = 100;
++pub const ENETUNREACH: c_int = 101;
++pub const ECONNABORTED: c_int = 103;
++pub const ECONNRESET: c_int = 104;
++pub const ENOTCONN: c_int = 107;
++pub const ETIMEDOUT: c_int = 110;
++pub const ECONNREFUSED: c_int = 111;
++pub const EHOSTUNREACH: c_int = 113;
++pub const EALREADY: c_int = 114;
++pub const EDEADLK: c_int = 35;
++pub const ENAMETOOLONG: c_int = 36;
++pub const EFBIG: c_int = 27;
++pub const EDQUOT: c_int = 122;
++pub const ESTALE: c_int = 116;
++pub const EXDEV: c_int = 18;
++pub const ETXTBSY: c_int = 26;
++pub const E2BIG: c_int = 7;
++pub const EBADF: c_int = 9;
++
++// -----------------------------------------------------------------------
++// Integer limits
++pub const INT_MIN: c_int = -2147483648;
++pub const INT_MAX: c_int = 2147483647;
++
++// -----------------------------------------------------------------------
++// External C functions provided by OP-TEE libc (libutils / libutee)
++//
++// These are linked via the build system; no explicit #[link] attribute
++// is needed here because the TA linker script handles it.
++unsafe extern "C" {
++    // ctype.h
++    pub fn isalpha(c: c_int) -> c_int;
++    pub fn isupper(c: c_int) -> c_int;
++    pub fn islower(c: c_int) -> c_int;
++    pub fn isdigit(c: c_int) -> c_int;
++    pub fn isxdigit(c: c_int) -> c_int;
++    pub fn isspace(c: c_int) -> c_int;
++    pub fn ispunct(c: c_int) -> c_int;
++    pub fn isalnum(c: c_int) -> c_int;
++    pub fn isprint(c: c_int) -> c_int;
++    pub fn isgraph(c: c_int) -> c_int;
++    pub fn iscntrl(c: c_int) -> c_int;
++    pub fn tolower(c: c_int) -> c_int;
++    pub fn toupper(c: c_int) -> c_int;
++
++    // malloc.h — provided by libutils
++    pub fn malloc(size: size_t) -> *mut c_void;
++    pub fn calloc(nobj: size_t, size: size_t) -> *mut c_void;
++    pub fn realloc(p: *mut c_void, size: size_t) -> *mut c_void;
++    pub fn free(p: *mut c_void);
++
++    // stdlib.h
++    pub fn abort() -> !;
++    pub fn rand() -> c_int;
++    pub fn abs(i: c_int) -> c_int;
++
++    // string.h
++    pub fn memcmp(cx: *const c_void, ct: *const c_void, n: size_t) -> c_int;
++    pub fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
++    pub fn memmove(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
++    pub fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut c_void;
++    pub fn memchr(cx: *const c_void, c: c_int, n: size_t) -> *mut c_void;
++    pub fn strcmp(cs: *const c_char, ct: *const c_char) -> c_int;
++    pub fn strncmp(cs: *const c_char, ct: *const c_char, n: size_t) -> c_int;
++    pub fn strlen(cs: *const c_char) -> size_t;
++    pub fn strnlen(cs: *const c_char, maxlen: size_t) -> size_t;
++    pub fn strdup(cs: *const c_char) -> *mut c_char;
++    pub fn strndup(cs: *const c_char, maxlen: size_t) -> *mut c_char;
++    pub fn strchr(cs: *const c_char, c: c_int) -> *mut c_char;
++    pub fn strstr(cs: *const c_char, ct: *const c_char) -> *mut c_char;
++    pub fn strcpy(dst: *mut c_char, src: *const c_char) -> *mut c_char;
++    pub fn strncpy(dst: *mut c_char, src: *const c_char, n: size_t) -> *mut c_char;
++}
+-- 
+2.34.1
+

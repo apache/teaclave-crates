@@ -1,0 +1,671 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+This patch adapts the Rust standard library for the OP-TEE target.
+Target: aarch64-unknown-optee, arm-unknown-optee
+Base-Commit: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf
+
+---
+ Cargo.lock                                    |  4 +-
+ Cargo.toml                                    |  3 +-
+ compiler/rustc_target/src/spec/base/mod.rs    |  1 +
+ compiler/rustc_target/src/spec/base/optee.rs  | 15 ++++
+ compiler/rustc_target/src/spec/mod.rs         |  4 +
+ .../src/spec/targets/aarch64_unknown_optee.rs | 26 ++++++
+ .../src/spec/targets/arm_unknown_optee.rs     | 23 ++++++
+ library/Cargo.lock                            |  4 +-
+ library/Cargo.toml                            |  1 +
+ library/panic_abort/src/lib.rs                |  8 ++
+ library/std/Cargo.toml                        |  2 +-
+ library/std/build.rs                          |  1 +
+ library/std/src/rt.rs                         |  2 +-
+ library/std/src/sys/alloc/mod.rs              |  3 +
+ library/std/src/sys/alloc/optee.rs            | 28 +++++++
+ library/std/src/sys/env_consts.rs             | 11 +++
+ library/std/src/sys/pal/mod.rs                |  4 +
+ library/std/src/sys/pal/optee/mod.rs          | 56 +++++++++++++
+ library/std/src/sys/pal/optee/os.rs           | 80 +++++++++++++++++++
+ library/std/src/sys/random/mod.rs             |  4 +
+ library/std/src/sys/random/optee.rs           |  9 +++
+ library/std/src/sys/stdio/mod.rs              |  4 +
+ library/std/src/sys/sync/condvar/mod.rs       |  4 +
+ library/std/src/sys/sync/mutex/mod.rs         |  4 +
+ .../std/src/sys/sync/thread_parking/mod.rs    |  4 +
+ library/std/src/sys/thread/mod.rs             |  5 ++
+ library/std/src/sys/thread_local/mod.rs       |  2 +
+ library/std/src/thread/lifecycle.rs           | 14 +++-
+ 28 files changed, 316 insertions(+), 10 deletions(-)
+ create mode 100644 compiler/rustc_target/src/spec/base/optee.rs
+ create mode 100644 compiler/rustc_target/src/spec/targets/aarch64_unknown_optee.rs
+ create mode 100644 compiler/rustc_target/src/spec/targets/arm_unknown_optee.rs
+ create mode 100644 library/std/src/sys/alloc/optee.rs
+ create mode 100644 library/std/src/sys/pal/optee/mod.rs
+ create mode 100644 library/std/src/sys/pal/optee/os.rs
+ create mode 100644 library/std/src/sys/random/optee.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 2cc2e094e9f..875d277d203 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2163,9 +2163,7 @@ checksum = "9fa0e2a1fcbe2f6be6c42e342259976206b383122fc152e872795338b5a3f3a7"
+ 
+ [[package]]
+ name = "libc"
+-version = "0.2.177"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
++version = "0.2.182"
+ 
+ [[package]]
+ name = "libdbus-sys"
+diff --git a/Cargo.toml b/Cargo.toml
+index 67c7a9d67ed..4acc152263c 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -91,5 +91,6 @@ codegen-units = 1
+ 
+ # If you want to use a crate with local modifications, you can set a path or git dependency here.
+ # For git dependencies, also add your source to ALLOWED_SOURCES in src/tools/tidy/src/extdeps.rs.
+-#[patch.crates-io]
++[patch.crates-io]
++libc = { path = "../libc" }
+ 
+diff --git a/compiler/rustc_target/src/spec/base/mod.rs b/compiler/rustc_target/src/spec/base/mod.rs
+index 9e7ff620fea..1bd87426392 100644
+--- a/compiler/rustc_target/src/spec/base/mod.rs
++++ b/compiler/rustc_target/src/spec/base/mod.rs
+@@ -28,6 +28,7 @@
+ pub(crate) mod netbsd;
+ pub(crate) mod nto_qnx;
+ pub(crate) mod openbsd;
++pub(crate) mod optee;
+ pub(crate) mod redox;
+ pub(crate) mod solaris;
+ pub(crate) mod solid;
+diff --git a/compiler/rustc_target/src/spec/base/optee.rs b/compiler/rustc_target/src/spec/base/optee.rs
+new file mode 100644
+index 00000000000..5f70e974a9d
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/base/optee.rs
+@@ -0,0 +1,15 @@
++use crate::spec::{Cc, LinkerFlavor, Lld, Os, PanicStrategy, RelroLevel, TargetOptions};
++
++pub(crate) fn opts() -> TargetOptions {
++    TargetOptions {
++        os: Os::Optee,
++        executables: true,
++        dynamic_linking: false,
++        linker_flavor: LinkerFlavor::Gnu(Cc::Yes, Lld::Yes),
++        has_rpath: true,
++        position_independent_executables: true,
++        relro_level: RelroLevel::Full,
++        panic_strategy: PanicStrategy::Abort,
++        ..Default::default()
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/mod.rs b/compiler/rustc_target/src/spec/mod.rs
+index 424026bdcea..ea1bb3fb92b 100644
+--- a/compiler/rustc_target/src/spec/mod.rs
++++ b/compiler/rustc_target/src/spec/mod.rs
+@@ -1765,6 +1765,9 @@ fn $module() {
+ 
+     ("aarch64-unknown-teeos", aarch64_unknown_teeos),
+ 
++    ("aarch64-unknown-optee", aarch64_unknown_optee),
++    ("arm-unknown-optee", arm_unknown_optee),
++
+     ("mips64-openwrt-linux-musl", mips64_openwrt_linux_musl),
+ 
+     ("aarch64-unknown-nto-qnx700", aarch64_unknown_nto_qnx700),
+@@ -1975,6 +1978,7 @@ pub enum Os {
+         Nto = "nto",
+         NuttX = "nuttx",
+         OpenBsd = "openbsd",
++        Optee = "optee",
+         Psp = "psp",
+         Psx = "psx",
+         Qurt = "qurt",
+diff --git a/compiler/rustc_target/src/spec/targets/aarch64_unknown_optee.rs b/compiler/rustc_target/src/spec/targets/aarch64_unknown_optee.rs
+new file mode 100644
+index 00000000000..64e7583ba9a
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/targets/aarch64_unknown_optee.rs
+@@ -0,0 +1,26 @@
++use crate::spec::{Arch, Target, TargetMetadata, base};
++
++pub(crate) fn target() -> Target {
++    let mut base = base::optee::opts();
++    base.features = "+strict-align".into();
++    base.max_atomic_width = Some(128);
++
++    Target {
++        // Use the AArch64 Linux LLVM triple so that existing LLVM codegen paths
++        // for AArch64 are selected.  The actual OS ABI is described by `os: Optee`
++        // in TargetOptions, not by the LLVM triple.
++        llvm_target: "aarch64-unknown-linux-gnu".into(),
++        metadata: TargetMetadata {
++            description: Some("ARM64 OP-TEE Trusted Execution Environment".into()),
++            tier: Some(3),
++            host_tools: Some(false),
++            std: Some(true),
++        },
++        pointer_width: 64,
++        data_layout:
++            "e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32"
++                .into(),
++        arch: Arch::AArch64,
++        options: base,
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/targets/arm_unknown_optee.rs b/compiler/rustc_target/src/spec/targets/arm_unknown_optee.rs
+new file mode 100644
+index 00000000000..c4bef53446c
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/targets/arm_unknown_optee.rs
+@@ -0,0 +1,23 @@
++use crate::spec::{Arch, Target, TargetMetadata, base};
++
++pub(crate) fn target() -> Target {
++    let mut base = base::optee::opts();
++    base.features = "+strict-align".into();
++    // ARMv7-A has LDREXD/STREXD so 64-bit atomics are available.
++    base.max_atomic_width = Some(64);
++
++    Target {
++        // Use the ARM Linux LLVM triple so LLVM selects the right codegen.
++        llvm_target: "arm-unknown-linux-gnueabihf".into(),
++        metadata: TargetMetadata {
++            description: Some("ARM OP-TEE Trusted Execution Environment".into()),
++            tier: Some(3),
++            host_tools: Some(false),
++            std: Some(true),
++        },
++        pointer_width: 32,
++        data_layout: "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64".into(),
++        arch: Arch::Arm,
++        options: base,
++    }
++}
+diff --git a/library/Cargo.lock b/library/Cargo.lock
+index accbbe9d236..a3402e45f67 100644
+--- a/library/Cargo.lock
++++ b/library/Cargo.lock
+@@ -146,9 +146,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "libc"
+-version = "0.2.177"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
++version = "0.2.182"
+ dependencies = [
+  "rustc-std-workspace-core",
+ ]
+diff --git a/library/Cargo.toml b/library/Cargo.toml
+index e30e6240942..d0a33941261 100644
+--- a/library/Cargo.toml
++++ b/library/Cargo.toml
+@@ -59,3 +59,4 @@ rustflags = ["-Cpanic=abort"]
+ rustc-std-workspace-core = { path = 'rustc-std-workspace-core' }
+ rustc-std-workspace-alloc = { path = 'rustc-std-workspace-alloc' }
+ rustc-std-workspace-std = { path = 'rustc-std-workspace-std' }
++libc = { path = '../../libc' }
+diff --git a/library/panic_abort/src/lib.rs b/library/panic_abort/src/lib.rs
+index d1706b65252..02c96c04ad7 100644
+--- a/library/panic_abort/src/lib.rs
++++ b/library/panic_abort/src/lib.rs
+@@ -50,6 +50,14 @@ pub unsafe fn __rust_start_panic(_payload: &mut dyn PanicPayload) -> u32 {
+     __rust_abort()
+ }
+ 
++// OP-TEE uses panic=abort and links alloc's OOM path via this internal symbol.
++// Keep it target-scoped to avoid affecting other platforms.
++#[cfg(target_os = "optee")]
++#[rustc_std_internal_symbol]
++pub unsafe extern "C" fn __rust_alloc_error_handler_should_panic_v2() -> u8 {
++    0
++}
++
+ // This... is a bit of an oddity. The tl;dr; is that this is required to link
+ // correctly, the longer explanation is below.
+ //
+diff --git a/library/std/Cargo.toml b/library/std/Cargo.toml
+index 3a673cf23b8..65e341b843a 100644
+--- a/library/std/Cargo.toml
++++ b/library/std/Cargo.toml
+@@ -33,7 +33,7 @@ miniz_oxide = { version = "0.8.0", optional = true, default-features = false }
+ addr2line = { version = "0.25.0", optional = true, default-features = false }
+ 
+ [target.'cfg(not(all(windows, target_env = "msvc")))'.dependencies]
+-libc = { version = "0.2.177", default-features = false, features = [
++libc = { version = "=0.2.182", default-features = false, features = [
+     'rustc-dep-of-std',
+ ], public = true }
+ 
+diff --git a/library/std/build.rs b/library/std/build.rs
+index bee28e88491..d15697681a9 100644
+--- a/library/std/build.rs
++++ b/library/std/build.rs
+@@ -49,6 +49,7 @@ fn main() {
+         || target_os == "hurd"
+         || target_os == "uefi"
+         || target_os == "teeos"
++        || target_os == "optee"
+         || target_os == "zkvm"
+         || target_os == "rtems"
+         || target_os == "nuttx"
+diff --git a/library/std/src/rt.rs b/library/std/src/rt.rs
+index 11c0a0b9daf..13ef8c06455 100644
+--- a/library/std/src/rt.rs
++++ b/library/std/src/rt.rs
+@@ -113,7 +113,7 @@ unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
+     // SAFETY: this is the only time and place where we call this function.
+     unsafe { main_thread::set(thread::current_id()) };
+ 
+-    #[cfg_attr(target_os = "teeos", allow(unused_unsafe))]
++    #[cfg_attr(any(target_os = "teeos", target_os = "optee"), allow(unused_unsafe))]
+     unsafe {
+         sys::init(argc, argv, sigpipe)
+     };
+diff --git a/library/std/src/sys/alloc/mod.rs b/library/std/src/sys/alloc/mod.rs
+index f2f1d1c7fec..b03cc382a1f 100644
+--- a/library/std/src/sys/alloc/mod.rs
++++ b/library/std/src/sys/alloc/mod.rs
+@@ -77,6 +77,9 @@ unsafe fn realloc_fallback(
+     ) => {
+         mod unix;
+     }
++    target_os = "optee" => {
++        mod optee;
++    }
+     target_os = "windows" => {
+         mod windows;
+     }
+diff --git a/library/std/src/sys/alloc/optee.rs b/library/std/src/sys/alloc/optee.rs
+new file mode 100644
+index 00000000000..07f7305e4f4
+--- /dev/null
++++ b/library/std/src/sys/alloc/optee.rs
+@@ -0,0 +1,28 @@
++//! Allocator for OP-TEE Trusted Applications.
++//!
++//! OP-TEE libutils provides malloc/free/calloc/realloc but NOT posix_memalign.
++
++use crate::alloc::{GlobalAlloc, Layout, System};
++
++#[stable(feature = "alloc_system_type", since = "1.28.0")]
++unsafe impl GlobalAlloc for System {
++    #[inline]
++    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
++        unsafe { libc::malloc(layout.size()) as *mut u8 }
++    }
++
++    #[inline]
++    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
++        unsafe { libc::calloc(layout.size(), 1) as *mut u8 }
++    }
++
++    #[inline]
++    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
++        unsafe { libc::free(ptr as *mut libc::c_void) }
++    }
++
++    #[inline]
++    unsafe fn realloc(&self, ptr: *mut u8, _layout: Layout, new_size: usize) -> *mut u8 {
++        unsafe { libc::realloc(ptr as *mut libc::c_void, new_size) as *mut u8 }
++    }
++}
+diff --git a/library/std/src/sys/env_consts.rs b/library/std/src/sys/env_consts.rs
+index 573f540483b..12f2f78d6d6 100644
+--- a/library/std/src/sys/env_consts.rs
++++ b/library/std/src/sys/env_consts.rs
+@@ -246,6 +246,17 @@ pub mod os {
+     pub const EXE_EXTENSION: &str = "";
+ }
+ 
++#[cfg(target_os = "optee")]
++pub mod os {
++    pub const FAMILY: &str = "";
++    pub const OS: &str = "optee";
++    pub const DLL_PREFIX: &str = "lib";
++    pub const DLL_SUFFIX: &str = ".so";
++    pub const DLL_EXTENSION: &str = "so";
++    pub const EXE_SUFFIX: &str = "";
++    pub const EXE_EXTENSION: &str = "";
++}
++
+ #[cfg(target_os = "redox")]
+ pub mod os {
+     pub const FAMILY: &str = "unix";
+diff --git a/library/std/src/sys/pal/mod.rs b/library/std/src/sys/pal/mod.rs
+index e11df38a8ee..402610c56aa 100644
+--- a/library/std/src/sys/pal/mod.rs
++++ b/library/std/src/sys/pal/mod.rs
+@@ -81,6 +81,10 @@
+         mod teeos;
+         pub use self::teeos::*;
+     }
++    target_os = "optee" => {
++        mod optee;
++        pub use self::optee::*;
++    }
+     target_os = "zkvm" => {
+         mod zkvm;
+         pub use self::zkvm::*;
+diff --git a/library/std/src/sys/pal/optee/mod.rs b/library/std/src/sys/pal/optee/mod.rs
+new file mode 100644
+index 00000000000..fb626ab5ae8
+--- /dev/null
++++ b/library/std/src/sys/pal/optee/mod.rs
+@@ -0,0 +1,56 @@
++//! System bindings for OP-TEE (Open Portable Trusted Execution Environment).
++//!
++//! OP-TEE TAs run inside a TEE with restricted resources.  There is no POSIX
++//! kernel; the C runtime is provided by libutee / libutils.  We therefore
++//! delegate most functionality to the `unsupported` stubs and only implement
++//! what is genuinely available: heap allocation via libc malloc, and
++//! mutex/condvar/thread-parking via the unsupported (no-threads) path.
++//!
++//! Notable differences from the teeos PAL:
++//! * No pthread support — OP-TEE TAs are single-threaded by default.
++//! * Random numbers via TEE_GenerateRandom (handled in sys/random).
++//! * stdout via TEE_Printf / trace macros (handled in sys/stdio).
++//! * No errno from libc — decode_error_kind maps to Uncategorized.
++
++#![deny(unsafe_op_in_unsafe_fn)]
++#![allow(unused_variables)]
++#![allow(dead_code)]
++
++pub mod os;
++#[path = "../unsupported/pipe.rs"]
++pub mod pipe;
++#[path = "../unsupported/time.rs"]
++pub mod time;
++
++use crate::io as std_io;
++
++pub fn unsupported<T>() -> std_io::Result<T> {
++    Err(unsupported_err())
++}
++
++pub fn unsupported_err() -> std_io::Error {
++    std_io::Error::UNSUPPORTED_PLATFORM
++}
++
++pub fn abort_internal() -> ! {
++    // Safety: abort() is declared in libc/src/optee/mod.rs as `fn abort() -> !`
++    unsafe { libc::abort() }
++}
++
++// OP-TEE TAs are loaded and called by the TEE kernel; there is no classic
++// main() entry point, so init/cleanup are no-ops here.
++pub fn init(_argc: isize, _argv: *const *const u8, _sigpipe: u8) {}
++
++// SAFETY: must be called only once during runtime cleanup.
++pub unsafe fn cleanup() {}
++
++pub fn is_interrupted(_errno: i32) -> bool {
++    // OP-TEE does not expose EINTR to TAs.
++    false
++}
++
++pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
++    // OP-TEE does not propagate errno values through libc to TAs in the same
++    // way POSIX systems do; map everything to Uncategorized for now.
++    crate::io::ErrorKind::Uncategorized
++}
+diff --git a/library/std/src/sys/pal/optee/os.rs b/library/std/src/sys/pal/optee/os.rs
+new file mode 100644
+index 00000000000..67687600f1e
+--- /dev/null
++++ b/library/std/src/sys/pal/optee/os.rs
+@@ -0,0 +1,80 @@
++//! `std::os` stubs for OP-TEE.
++//!
++//! OP-TEE TAs have no filesystem, no environment variables, and no process
++//! concept.  All functions that have no sensible OP-TEE equivalent panic or
++//! return an error.
++
++use super::unsupported;
++use crate::ffi::{OsStr, OsString};
++use crate::marker::PhantomData;
++use crate::path::{self, PathBuf};
++use crate::{fmt, io};
++
++pub fn errno() -> i32 {
++    0
++}
++
++pub fn error_string(_errno: i32) -> String {
++    "error string unimplemented on optee".to_string()
++}
++
++pub fn getcwd() -> io::Result<PathBuf> {
++    unsupported()
++}
++
++pub fn chdir(_: &path::Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub struct SplitPaths<'a>(!, PhantomData<&'a ()>);
++
++pub fn split_paths(_unparsed: &OsStr) -> SplitPaths<'_> {
++    panic!("unsupported on optee")
++}
++
++impl<'a> Iterator for SplitPaths<'a> {
++    type Item = PathBuf;
++    fn next(&mut self) -> Option<PathBuf> {
++        self.0
++    }
++}
++
++#[derive(Debug)]
++pub struct JoinPathsError;
++
++pub fn join_paths<I, T>(_paths: I) -> Result<OsString, JoinPathsError>
++where
++    I: Iterator<Item = T>,
++    T: AsRef<OsStr>,
++{
++    Err(JoinPathsError)
++}
++
++impl fmt::Display for JoinPathsError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        "not supported on optee".fmt(f)
++    }
++}
++
++impl crate::error::Error for JoinPathsError {}
++
++pub fn current_exe() -> io::Result<PathBuf> {
++    unsupported()
++}
++
++pub fn temp_dir() -> PathBuf {
++    panic!("no filesystem on optee")
++}
++
++pub fn home_dir() -> Option<PathBuf> {
++    None
++}
++
++pub fn exit(_code: i32) -> ! {
++    // TAs should not call exit(); the TEE kernel manages TA lifecycle.
++    panic!("TA should not call `exit`")
++}
++
++pub fn getpid() -> u32 {
++    panic!("no pids on optee")
++}
+diff --git a/library/std/src/sys/random/mod.rs b/library/std/src/sys/random/mod.rs
+index 91f72d07387..51abe67429e 100644
+--- a/library/std/src/sys/random/mod.rs
++++ b/library/std/src/sys/random/mod.rs
+@@ -78,6 +78,10 @@
+         mod teeos;
+         pub use teeos::fill_bytes;
+     }
++    target_os = "optee" => {
++        mod optee;
++        pub use optee::fill_bytes;
++    }
+     target_os = "trusty" => {
+         mod trusty;
+         pub use trusty::fill_bytes;
+diff --git a/library/std/src/sys/random/optee.rs b/library/std/src/sys/random/optee.rs
+new file mode 100644
+index 00000000000..20444a4f0d5
+--- /dev/null
++++ b/library/std/src/sys/random/optee.rs
+@@ -0,0 +1,9 @@
++//! Random number generation for OP-TEE using TEE_GenerateRandom.
++
++unsafe extern "C" {
++    fn TEE_GenerateRandom(randomBuffer: *mut core::ffi::c_void, randomBufferLen: usize);
++}
++
++pub fn fill_bytes(bytes: &mut [u8]) {
++    unsafe { TEE_GenerateRandom(bytes.as_mut_ptr().cast(), bytes.len()) }
++}
+diff --git a/library/std/src/sys/stdio/mod.rs b/library/std/src/sys/stdio/mod.rs
+index d51ea9ad726..2b0a07be763 100644
+--- a/library/std/src/sys/stdio/mod.rs
++++ b/library/std/src/sys/stdio/mod.rs
+@@ -25,6 +25,10 @@
+         mod teeos;
+         pub use teeos::*;
+     }
++    target_os = "optee" => {
++        mod unsupported;
++        pub use unsupported::*;
++    }
+     target_os = "trusty" => {
+         mod trusty;
+         pub use trusty::*;
+diff --git a/library/std/src/sys/sync/condvar/mod.rs b/library/std/src/sys/sync/condvar/mod.rs
+index 83cf0ae6298..c55ab7f53a1 100644
+--- a/library/std/src/sys/sync/condvar/mod.rs
++++ b/library/std/src/sys/sync/condvar/mod.rs
+@@ -21,6 +21,10 @@
+         mod pthread;
+         pub use pthread::Condvar;
+     }
++    target_os = "optee" => {
++        mod no_threads;
++        pub use no_threads::Condvar;
++    }
+     all(target_os = "windows", target_vendor = "win7") => {
+         mod windows7;
+         pub use windows7::Condvar;
+diff --git a/library/std/src/sys/sync/mutex/mod.rs b/library/std/src/sys/sync/mutex/mod.rs
+index e3d6ad1129c..e69195b644a 100644
+--- a/library/std/src/sys/sync/mutex/mod.rs
++++ b/library/std/src/sys/sync/mutex/mod.rs
+@@ -24,6 +24,10 @@
+         mod pthread;
+         pub use pthread::Mutex;
+     }
++    target_os = "optee" => {
++        mod no_threads;
++        pub use no_threads::Mutex;
++    }
+     all(target_os = "windows", target_vendor = "win7") => {
+         mod windows7;
+         pub use windows7::{Mutex, raw};
+diff --git a/library/std/src/sys/sync/thread_parking/mod.rs b/library/std/src/sys/sync/thread_parking/mod.rs
+index 74b5b72b19a..2df2ab48b6a 100644
+--- a/library/std/src/sys/sync/thread_parking/mod.rs
++++ b/library/std/src/sys/sync/thread_parking/mod.rs
+@@ -42,6 +42,10 @@
+         mod pthread;
+         pub use pthread::Parker;
+     }
++    target_os = "optee" => {
++        mod unsupported;
++        pub use unsupported::Parker;
++    }
+     _ => {
+         mod unsupported;
+         pub use unsupported::Parker;
+diff --git a/library/std/src/sys/thread/mod.rs b/library/std/src/sys/thread/mod.rs
+index b98be62be0a..ddf8d966a8f 100644
+--- a/library/std/src/sys/thread/mod.rs
++++ b/library/std/src/sys/thread/mod.rs
+@@ -41,6 +41,11 @@
+         mod unsupported;
+         pub use unsupported::{available_parallelism, current_os_id, set_name};
+     }
++    target_os = "optee" => {
++        // OP-TEE TAs are single-threaded; all thread ops are unsupported.
++        mod unsupported;
++        pub use unsupported::{Thread, available_parallelism, current_os_id, set_name, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
++    }
+     target_os = "uefi" => {
+         mod uefi;
+         pub use uefi::{available_parallelism, sleep};
+diff --git a/library/std/src/sys/thread_local/mod.rs b/library/std/src/sys/thread_local/mod.rs
+index e88011aa22d..a077fb1cefa 100644
+--- a/library/std/src/sys/thread_local/mod.rs
++++ b/library/std/src/sys/thread_local/mod.rs
+@@ -30,6 +30,7 @@
+         target_os = "zkvm",
+         target_os = "trusty",
+         target_os = "vexos",
++        target_os = "optee",
+     ) => {
+         mod no_threads;
+         pub use no_threads::{EagerStorage, LazyStorage, thread_local_inner};
+@@ -100,6 +101,7 @@ pub(crate) mod guard {
+             target_os = "zkvm",
+             target_os = "trusty",
+             target_os = "vexos",
++            target_os = "optee",
+         ) => {
+             pub(crate) fn enable() {
+                 // FIXME: Right now there is no concept of "thread exit" on
+diff --git a/library/std/src/thread/lifecycle.rs b/library/std/src/thread/lifecycle.rs
+index 119322b909b..e07fe8094ce 100644
+--- a/library/std/src/thread/lifecycle.rs
++++ b/library/std/src/thread/lifecycle.rs
+@@ -110,8 +110,20 @@ fn drop(&mut self) {
+ 
+     // SAFETY: dynamic size and alignment of the Box remain the same. See below for why the
+     // lifetime change is justified.
++    //
++    // NOTE(optee-port): When building this std port with newer nightly compilers,
++    // direct raw-pointer casts that change trait-object lifetimes are rejected.
++    // We therefore mirror the upstream fix that uses an explicit pointer
++    // transmute before rebuilding the Box.
++    // Issue: https://github.com/rust-lang/rust/issues/141402
++    // Fix commit: https://github.com/rust-lang/rust/commit/85aeb4f
+     let rust_start = unsafe {
+-        Box::from_raw(Box::into_raw(Box::new(rust_start)) as *mut (dyn FnOnce() + Send + 'static))
++        let ptr = Box::into_raw(Box::new(rust_start));
++        let ptr = crate::mem::transmute::<
++            *mut (dyn FnOnce() + Send + '_),
++            *mut (dyn FnOnce() + Send + 'static),
++        >(ptr);
++        Box::from_raw(ptr)
+     };
+ 
+     let init = Box::new(ThreadInit { handle: thread.clone(), rust_start });
+-- 
+2.34.1
+
