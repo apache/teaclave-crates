@@ -22,13 +22,22 @@ This repository serves to:
 
 ## Principles for Management
 
-This repository follows a structured monorepo layout under the `crates/` directory. Each subdirectory hosts a TEE-adapted version of an upstream Rust crate.
+This repository supports two hosting approaches, selected per dependency and maintenance cost:
+
+1. **Patch bundle approach**  
+	Keep a known upstream source snapshot and maintain Teaclave/TEE adaptation patches in this repository.
+2. **Full crate import approach**  
+	Import the adapted crate source directly into this repository when a standalone crate copy is clearer or easier to maintain.
+
+In practice, both approaches are valid and can coexist in the same repository based on actual needs.
+
+Typical layout examples:
 
 ```
 crates/
-├── foo/ # Adaptation of the foo crate
-├── bar/ # Adaptation of the bar crate
-├── ...
+├── foo-VERSION/ # can be full crate source code
+├── bar-VERSION/ # can be patch files
+└── ...
 ```
 
 Each adapted crate is:
