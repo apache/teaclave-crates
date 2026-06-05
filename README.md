@@ -5,6 +5,11 @@
 
 This repository hosts Rust crates maintained by the [Teaclave community](https://github.com/apache/teaclave). These include ported and TEE-adapted dependencies designed for secure, memory-safe development in confidential computing environments.
 
+> **Security note:** every crate here is linked into the trusted side of a TEE
+> application, so the whole repository is part of its consumers' Trusted
+> Computing Base. See [docs/security-model.md](docs/security-model.md) for the
+> trust model, the diff-from-upstream review unit, and supply-chain guidance.
+
 ## Purpose of This Repository
 
 ### Adapting With Target-Dependent Security Primitives
@@ -31,14 +36,30 @@ This repository supports two hosting approaches, selected per dependency and mai
 
 In practice, both approaches are valid and can coexist in the same repository based on actual needs.
 
-Typical layout examples:
+Each adapted crate lives in its own directory at the repository root. The
+directory name encodes the hosting approach: a **full crate import** is named
+`<crate>-<version>`, while a **patch bundle** appends the pinned upstream
+base-commit, `<crate>-<version>-<base-commit>`, and contains `*.patch` files
+applied on top of that snapshot.
 
 ```
-crates/
-├── foo-VERSION/ # can be full crate source code
-├── bar-VERSION/ # can be patch files
-└── ...
+.
+├── getrandom-0.2.16/          # full crate import (adapts the randomness source)
+├── ring-0.17.14/             # full crate import (crypto)
+├── libc-0.2.182-e879ee9/     # patch bundle: optee-*.patch over a pinned snapshot
+└── rust-1.93.1-01f6ddf/      # patch bundle: Rust std/compiler patches for OP-TEE
 ```
+
+Both approaches keep the **TEE adaptation reviewable as a diff against pristine
+upstream**:
+
+- **Full crate import** — the commit history follows a two-step convention: a
+  `Download <crate> <version> from crates.io` commit imports the **unmodified
+  upstream source** (including `.cargo_vcs_info.json`, which records the upstream
+  revision), and the following commit(s) apply the TEE port. The adaptation delta
+  is therefore `git diff <download-commit> HEAD -- <crate-dir>/`.
+- **Patch bundle** — the adaptation delta is the in-tree `*.patch` file, applied
+  on top of the pinned `Base-Commit` upstream snapshot.
 
 Each adapted crate is:
 
